@@ -1,0 +1,80 @@
+﻿# Local development environment.
+# Starts three services: the FastAPI app, PostgreSQL, and Redis.
+# Usage:
+#   docker-compose up --build       ← start everything
+#   docker-compose down -v          ← stop and delete volumes
+#   docker-compose logs -f app      ← follow app logs
+
+version: "3.9"
+
+services:
+
+  # ── FastAPI application ───────────────────────────────────────────────────
+  app:
+    build: .
+    container_name: njangui_app
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL:  postgresql://postgres:postgres@db:5432/njangui
+      REDIS_URL:     redis://redis:6379/0
+      SECRET_KEY:    dev-secret-key-change-in-production
+      ALGORITHM:     HS256
+      ENVIRONMENT:   development
+      DEBUG:         "true"
+      PORT:          "8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      # Hot-reload: mount source code so changes reflect without rebuild
+      - .:/app
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+
+  # ── PostgreSQL 15 ─────────────────────────────────────────────────────────
+  db:
+    image: postgres:15-alpine
+    container_name: njangui_db
+    environment:
+      POSTGRES_USER:     postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB:       njangui
+    ports:
+      - "5432:5432"       # expose so you can connect with DBeaver / pgAdmin
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis 7 ───────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: njangui_redis
+    ports:
+      - "6379:6379"
+
+  # ── Test database (separate from dev DB) ──────────────────────────────────
+  db_test:
+    image: postgres:15-alpine
+    container_name: njangui_db_test
+    environment:
+      POSTGRES_USER:     postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB:       njangui_test
+    ports:
+      - "5433:5432"     # different host port to avoid conflict with dev DB
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

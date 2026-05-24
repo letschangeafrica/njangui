@@ -1,0 +1,108 @@
+﻿# ── CI Pipeline ──────────────────────────────────────────────────────────────
+# Runs on every push and every Pull Request.
+# If any step fails, the pipeline stops and the PR is blocked.
+#
+# Steps:
+#   1. Lint (ruff) — catches syntax errors and bad imports instantly
+#   2. Run Alembic migration against a real PostgreSQL test container
+#   3. Run pytest — full test suite with coverage report
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]           # every branch
+  pull_request:
+    branches: [main]           # PRs targeting main
+
+jobs:
+  test:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+
+    # ── Service containers ──────────────────────────────────────────────────
+    # GitHub Actions spins these up before the job steps run.
+    # They are accessible at localhost on the mapped port.
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER:     postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB:       Njangui_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    # ── Environment variables ───────────────────────────────────────────────
+    # These are available to all steps in this job.
+    # Secret values come from GitHub repository Settings → Secrets and variables.
+    env:
+      DATABASE_URL:      postgresql://postgres:postgres@localhost:5432/Njangui_test
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/Njangui_test
+      REDIS_URL:         redis://localhost:6379/0
+      SECRET_KEY:        ci-test-secret-key-not-used-in-production
+      ALGORITHM:         HS256
+      ENVIRONMENT:       test
+      DEBUG:             "true"
+
+    steps:
+      # ── 1. Checkout code ─────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. Set up Python ─────────────────────────────────────────────────
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"           # caches pip downloads between runs
+
+      # ── 3. Install dependencies ──────────────────────────────────────────
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff pytest-cov
+
+      # ── 4. Lint with ruff ────────────────────────────────────────────────
+      # Ruff is a fast Python linter — catches import errors, undefined names,
+      # unused variables. Fails fast before we even touch the database.
+      - name: Lint with ruff
+        run: |
+          ruff check app/ tests/
+          ruff format --check app/ tests/
+
+      # ── 5. Run Alembic migrations ────────────────────────────────────────
+      # Apply the real migration to the test database.
+      # This proves the migration itself works (not just the app code).
+      - name: Run database migrations
+        run: alembic upgrade head
+
+      # ── 6. Run tests with coverage ───────────────────────────────────────
+      - name: Run tests
+        run: |
+          pytest tests/ \
+            --cov=app \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-fail-under=70
+
+      # ── 7. Upload coverage report ────────────────────────────────────────
+      # Optional: sends coverage data to Codecov for a coverage badge in README.
+      # Remove this step if you don't want to use Codecov.
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        if: success()
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: false   # don't fail CI if Codecov is down
