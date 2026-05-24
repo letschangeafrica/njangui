@@ -26,13 +26,13 @@ def health_check():
 
 
 # ── Registered routers ───────────────────────────────────────────────────────
-from app.routers import auth  # noqa: E402
+from app.routers import auth       # noqa: E402
+from app.routers import providers  # noqa: E402
 
-app.include_router(auth.router, prefix="/auth", tags=["Auth"])
+app.include_router(auth.router,      prefix="/auth",      tags=["Auth"])
+app.include_router(providers.router, prefix="/providers", tags=["Providers"])
 
 # Coming next:
-# from app.routers import providers, transactions, search, prices
-# app.include_router(providers.router,    prefix="/providers",    tags=["Providers"])
+# from app.routers import transactions, prices
 # app.include_router(transactions.router, prefix="/transactions", tags=["Transactions"])
-# app.include_router(search.router,       prefix="/search",       tags=["Search"])
 # app.include_router(prices.router,       prefix="/prices",       tags=["Prices"])
