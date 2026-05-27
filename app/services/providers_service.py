@@ -19,10 +19,11 @@ from app.schemas.providers import ProviderRegisterIn, ProviderUpdateIn
 # Reference data
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 def get_categories(db: Session) -> list[Category]:
     return (
         db.query(Category)
-        .filter(Category.is_active == True)        # noqa: E712
+        .filter(Category.is_active == True)  # noqa: E712
         .order_by(Category.sort_order)
         .all()
     )
@@ -31,7 +32,7 @@ def get_categories(db: Session) -> list[Category]:
 def get_location_nodes(db: Session) -> list[LocationNode]:
     return (
         db.query(LocationNode)
-        .filter(LocationNode.is_active == True)    # noqa: E712
+        .filter(LocationNode.is_active == True)  # noqa: E712
         .order_by(LocationNode.sort_order)
         .all()
     )
@@ -40,6 +41,7 @@ def get_location_nodes(db: Session) -> list[LocationNode]:
 # ═══════════════════════════════════════════════════════════════════════════════
 # Provider registration
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 def register_provider(
     data: ProviderRegisterIn,
@@ -56,7 +58,7 @@ def register_provider(
     # 2. Validate category
     category = db.query(Category).filter(
         Category.id == data.category_id,
-        Category.is_active == True,         # noqa: E712
+        Category.is_active == True,  # noqa: E712
     ).first()
     if not category:
         raise HTTPException(
@@ -68,7 +70,7 @@ def register_provider(
     sub_category = db.query(SubCategory).filter(
         SubCategory.id == data.sub_category_id,
         SubCategory.category_id == data.category_id,
-        SubCategory.is_active == True,      # noqa: E712
+        SubCategory.is_active == True,  # noqa: E712
     ).first()
     if not sub_category:
         raise HTTPException(
@@ -82,7 +84,7 @@ def register_provider(
     # 4. Validate location node
     location_node = db.query(LocationNode).filter(
         LocationNode.id == data.location_node_id,
-        LocationNode.is_active == True,     # noqa: E712
+        LocationNode.is_active == True,  # noqa: E712
     ).first()
     if not location_node:
         raise HTTPException(
@@ -113,6 +115,7 @@ def register_provider(
 # Provider profile update
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 def update_provider(
     data: ProviderUpdateIn,
     current_user: User,
@@ -129,14 +132,15 @@ def update_provider(
             detail="Vous n'avez pas encore de profil prestataire.",
         )
 
-    # The effective category is the new one (if being changed) or the existing one
-    effective_category_id = data.category_id if data.category_id is not None else profile.category_id
+    # Effective category: new one if being changed, otherwise existing
+    effective_category_id = (
+        data.category_id if data.category_id is not None else profile.category_id
+    )
 
-    # Validate new category if provided
     if data.category_id is not None:
         cat = db.query(Category).filter(
             Category.id == data.category_id,
-            Category.is_active == True,     # noqa: E712
+            Category.is_active == True,  # noqa: E712
         ).first()
         if not cat:
             raise HTTPException(
@@ -144,7 +148,6 @@ def update_provider(
                 detail=f"Catégorie {data.category_id} introuvable.",
             )
 
-    # Validate new sub-category if provided
     if data.sub_category_id is not None:
         sub = db.query(SubCategory).filter(
             SubCategory.id == data.sub_category_id,
@@ -160,7 +163,6 @@ def update_provider(
                 ),
             )
 
-    # Validate new location if provided
     if data.location_node_id is not None:
         loc = db.query(LocationNode).filter(
             LocationNode.id == data.location_node_id,
@@ -172,13 +174,18 @@ def update_provider(
                 detail=f"Zone géographique {data.location_node_id} introuvable.",
             )
 
-    # Apply updates
-    if data.full_name          is not None: profile.full_name          = data.full_name
-    if data.category_id        is not None: profile.category_id        = data.category_id
-    if data.sub_category_id    is not None: profile.sub_category_id    = data.sub_category_id
-    if data.location_node_id   is not None: profile.location_node_id   = data.location_node_id
-    if data.is_mobile_provider is not None: profile.is_mobile_provider = data.is_mobile_provider
-    if data.offers_delivery    is not None: profile.offers_delivery    = data.offers_delivery
+    if data.full_name is not None:
+        profile.full_name = data.full_name
+    if data.category_id is not None:
+        profile.category_id = data.category_id
+    if data.sub_category_id is not None:
+        profile.sub_category_id = data.sub_category_id
+    if data.location_node_id is not None:
+        profile.location_node_id = data.location_node_id
+    if data.is_mobile_provider is not None:
+        profile.is_mobile_provider = data.is_mobile_provider
+    if data.offers_delivery is not None:
+        profile.offers_delivery = data.offers_delivery
 
     db.commit()
     db.refresh(profile)
@@ -189,20 +196,20 @@ def update_provider(
 # Provider search — paginated
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 def search_providers(
     db: Session,
     location_node_id: Optional[int] = None,
-    category_id:      Optional[int] = None,
-    sub_category_id:  Optional[int] = None,
-    mobile_only:      bool = False,
-    delivery_only:    bool = False,
-    page:             int  = 1,
-    page_size:        int  = 20,
+    category_id: Optional[int] = None,
+    sub_category_id: Optional[int] = None,
+    mobile_only: bool = False,
+    delivery_only: bool = False,
+    page: int = 1,
+    page_size: int = 20,
 ) -> dict:
     """
     Search active providers with optional filters.
-    Returns a paginated dict: {total, page, page_size, results}.
-    Ranked by confirmed_tx_count DESC, thumbs_up_count DESC.
+    Returns {total, page, page_size, results}.
     """
     query = db.query(ProviderProfile).filter(ProviderProfile.is_active == True)  # noqa: E712
 
@@ -213,14 +220,13 @@ def search_providers(
     if sub_category_id is not None:
         query = query.filter(ProviderProfile.sub_category_id == sub_category_id)
     if mobile_only:
-        query = query.filter(ProviderProfile.is_mobile_provider == True)   # noqa: E712
+        query = query.filter(ProviderProfile.is_mobile_provider == True)  # noqa: E712
     if delivery_only:
-        query = query.filter(ProviderProfile.offers_delivery == True)      # noqa: E712
+        query = query.filter(ProviderProfile.offers_delivery == True)  # noqa: E712
 
     total = query.count()
     results = (
-        query
-        .order_by(
+        query.order_by(
             ProviderProfile.confirmed_tx_count.desc(),
             ProviderProfile.thumbs_up_count.desc(),
         )
@@ -235,6 +241,7 @@ def search_providers(
 # ═══════════════════════════════════════════════════════════════════════════════
 # Single profile lookups
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 def get_my_provider_profile(current_user: User, db: Session) -> ProviderProfile:
     profile = (
