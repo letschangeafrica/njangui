@@ -1,18 +1,10 @@
 """
-Providers router — HTTP layer for provider endpoints.
-
-Endpoints:
-  GET  /providers/categories     → list all categories (mobile dropdown)
-  GET  /providers/locations      → list all location nodes (mobile dropdown)
-  POST /providers/register       → register current user as a provider
-  GET  /providers/me             → get own provider profile (authenticated)
-  GET  /providers                → search providers (filter by location + category)
-  GET  /providers/{provider_id}  → get one provider's full profile
+Providers router.
 
 Route ordering matters in FastAPI:
-  /providers/categories, /providers/locations, and /providers/me MUST be
-  defined BEFORE /providers/{provider_id} — otherwise FastAPI would try to
-  match those literal strings as a UUID and return a 422 validation error.
+  /providers/categories, /providers/locations, /providers/me
+  MUST be before /providers/{provider_id} — otherwise FastAPI tries to parse
+  "categories", "locations", "me" as UUIDs and returns 422.
 """
 
 import uuid
@@ -28,7 +20,8 @@ from app.schemas.providers import (
     LocationNodeOut,
     ProviderOut,
     ProviderRegisterIn,
-    ProviderSummaryOut,
+    ProviderSearchOut,
+    ProviderUpdateIn,
 )
 from app.services import providers_service
 
@@ -41,11 +34,6 @@ router = APIRouter()
     response_model=list[CategoryOut],
     status_code=status.HTTP_200_OK,
     summary="List all categories",
-    description=(
-        "Returns the 8 active service categories in sort order. "
-        "Used by the mobile app to populate the category picker. "
-        "No authentication required."
-    ),
 )
 def list_categories(db: Session = Depends(get_db)):
     return providers_service.get_categories(db)
@@ -57,11 +45,6 @@ def list_categories(db: Session = Depends(get_db)):
     response_model=list[LocationNodeOut],
     status_code=status.HTTP_200_OK,
     summary="List all location nodes",
-    description=(
-        "Returns the 16 predefined Yaoundé economic nodes in sort order. "
-        "Used by the mobile app to populate the neighbourhood picker. "
-        "No authentication required."
-    ),
 )
 def list_locations(db: Session = Depends(get_db)):
     return providers_service.get_location_nodes(db)
@@ -73,23 +56,13 @@ def list_locations(db: Session = Depends(get_db)):
     response_model=ProviderOut,
     status_code=status.HTTP_201_CREATED,
     summary="Register as a provider",
-    description=(
-        "Upgrades the authenticated user's account to include a provider profile. "
-        "The user's role changes from 'customer' to 'both'. "
-        "A user can only have one provider profile. "
-        "Requires a valid Bearer token."
-    ),
 )
 def register_provider(
     body: ProviderRegisterIn,
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return providers_service.register_provider(
-        data=body,
-        current_user=current_user,
-        db=db,
-    )
+    return providers_service.register_provider(data=body, current_user=current_user, db=db)
 
 
 # ── GET /providers/me ─────────────────────────────────────────────────────────
@@ -98,47 +71,56 @@ def register_provider(
     response_model=ProviderOut,
     status_code=status.HTTP_200_OK,
     summary="Get own provider profile",
-    description=(
-        "Returns the authenticated user's own provider profile. "
-        "Returns 404 if the user hasn't registered as a provider yet. "
-        "Requires a valid Bearer token."
-    ),
 )
 def get_my_profile(
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return providers_service.get_my_provider_profile(
-        current_user=current_user,
-        db=db,
-    )
+    return providers_service.get_my_provider_profile(current_user=current_user, db=db)
+
+
+# ── PUT /providers/me ─────────────────────────────────────────────────────────
+@router.put(
+    "/me",
+    response_model=ProviderOut,
+    status_code=status.HTTP_200_OK,
+    summary="Update own provider profile",
+)
+def update_my_profile(
+    body: ProviderUpdateIn,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return providers_service.update_provider(data=body, current_user=current_user, db=db)
 
 
 # ── GET /providers ────────────────────────────────────────────────────────────
 @router.get(
     "",
-    response_model=list[ProviderSummaryOut],
+    response_model=ProviderSearchOut,
     status_code=status.HTTP_200_OK,
     summary="Search providers",
-    description=(
-        "Returns active providers filtered by location and/or category. "
-        "Results are ranked by reputation: confirmed_tx_count DESC, thumbs_up_count DESC. "
-        "Both filters are optional. Supports pagination."
-    ),
 )
 def search_providers(
     location_node_id: Optional[int] = Query(None, description="Filter by neighbourhood ID"),
     category_id:      Optional[int] = Query(None, description="Filter by category ID"),
-    limit:            int           = Query(20,   ge=1, le=50),
-    offset:           int           = Query(0,    ge=0),
+    sub_category_id:  Optional[int] = Query(None, description="Filter by sub-category ID"),
+    mobile_only:      bool          = Query(False, description="Only mobile providers"),
+    delivery_only:    bool          = Query(False, description="Only providers with delivery"),
+    page:             int           = Query(1,  ge=1),
+    page_size:        int           = Query(20, ge=1, le=50),
     db: Session = Depends(get_db),
 ):
+    page_size = min(page_size, 50)  # hard cap even if validation is bypassed
     return providers_service.search_providers(
         db=db,
         location_node_id=location_node_id,
         category_id=category_id,
-        limit=limit,
-        offset=offset,
+        sub_category_id=sub_category_id,
+        mobile_only=mobile_only,
+        delivery_only=delivery_only,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -148,16 +130,9 @@ def search_providers(
     response_model=ProviderOut,
     status_code=status.HTTP_200_OK,
     summary="Get a provider profile",
-    description=(
-        "Returns the full profile for a single provider by their profile UUID. "
-        "Returns 404 if the provider does not exist or is suspended."
-    ),
 )
 def get_provider(
     provider_id: uuid.UUID,
     db: Session = Depends(get_db),
 ):
-    return providers_service.get_provider_by_id(
-        provider_id=provider_id,
-        db=db,
-    )
+    return providers_service.get_provider_by_id(provider_id=provider_id, db=db)

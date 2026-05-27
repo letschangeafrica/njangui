@@ -1,15 +1,17 @@
 """
 Pydantic schemas for the providers module.
 
-Request schemas  (what the mobile app sends):
+Request schemas:
   - ProviderRegisterIn  : register as a provider
+  - ProviderUpdateIn    : partial update of own provider profile
 
-Response schemas (what the API sends back):
-  - CategoryOut         : one category (for dropdown)
-  - SubCategoryOut      : one sub-category (for dropdown)
-  - LocationNodeOut     : one location node (for dropdown)
-  - ProviderOut         : full provider profile
-  - ProviderSummaryOut  : condensed card shown in search results list
+Response schemas:
+  - CategoryOut         : one category with its sub-categories (for dropdown)
+  - SubCategoryOut      : one sub-category
+  - LocationNodeOut     : one location node with coordinates
+  - ProviderOut         : full provider profile (register / me / get-by-id)
+  - ProviderSummaryOut  : condensed card shown in search results
+  - ProviderSearchOut   : paginated search response
 """
 
 import uuid
@@ -20,19 +22,8 @@ from pydantic import BaseModel, field_validator
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Reference data schemas — returned to populate mobile app dropdowns
+# Reference data schemas — populate mobile app dropdowns
 # ═══════════════════════════════════════════════════════════════════════════════
-
-class CategoryOut(BaseModel):
-    id:         int
-    name_fr:    str
-    name_en:    str
-    slug:       str
-    icon_name:  str
-    sort_order: int
-
-    model_config = {"from_attributes": True}
-
 
 class SubCategoryOut(BaseModel):
     id:          int
@@ -44,10 +35,24 @@ class SubCategoryOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class CategoryOut(BaseModel):
+    id:              int
+    name_fr:         str
+    name_en:         str
+    slug:            str
+    icon_name:       str
+    sort_order:      int
+    sub_categories:  list[SubCategoryOut] = []
+
+    model_config = {"from_attributes": True}
+
+
 class LocationNodeOut(BaseModel):
     id:              int
     name:            str
     display_name_fr: str
+    latitude:        float
+    longitude:       float
     sort_order:      int
 
     model_config = {"from_attributes": True}
@@ -58,14 +63,6 @@ class LocationNodeOut(BaseModel):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class ProviderRegisterIn(BaseModel):
-    """
-    Payload to upgrade a customer account to a provider profile.
-
-    The mobile app populates category_id, sub_category_id, and location_node_id
-    from the seeded reference data returned by GET /providers/categories and
-    GET /providers/locations — so IDs are always valid integers from a dropdown,
-    never free text.
-    """
     full_name:          str
     category_id:        int
     sub_category_id:    int
@@ -85,16 +82,29 @@ class ProviderRegisterIn(BaseModel):
             raise ValueError("Le nom complet ne peut pas dépasser 100 caractères.")
         return v
 
-    model_config = {"json_schema_extra": {
-        "example": {
-            "full_name":          "Jean-Baptiste Mbarga",
-            "category_id":        1,
-            "sub_category_id":    2,
-            "location_node_id":   1,
-            "is_mobile_provider": False,
-            "offers_delivery":    False,
-        }
-    }}
+
+class ProviderUpdateIn(BaseModel):
+    """Partial update — every field is optional."""
+    full_name:          Optional[str]  = None
+    category_id:        Optional[int]  = None
+    sub_category_id:    Optional[int]  = None
+    location_node_id:   Optional[int]  = None
+    is_mobile_provider: Optional[bool] = None
+    offers_delivery:    Optional[bool] = None
+
+    @field_validator("full_name")
+    @classmethod
+    def name_not_empty(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            raise ValueError("Le nom complet ne peut pas être vide.")
+        if len(v) < 2:
+            raise ValueError("Le nom complet doit contenir au moins 2 caractères.")
+        if len(v) > 100:
+            raise ValueError("Le nom complet ne peut pas dépasser 100 caractères.")
+        return v
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -102,13 +112,13 @@ class ProviderRegisterIn(BaseModel):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class ProviderSummaryOut(BaseModel):
-    """
-    Condensed provider card shown in search results.
-    Only the fields needed to render the card — keeps the list response light
-    for 2G connections.
-    """
+    """Condensed card for search results — light payload for 2G."""
     id:                  uuid.UUID
     full_name:           str
+    # Flat IDs — used by mobile app to filter / verify results
+    category_id:         int
+    sub_category_id:     int
+    location_node_id:    int
     is_mobile_provider:  bool
     offers_delivery:     bool
     id_card_verified:    bool
@@ -116,6 +126,7 @@ class ProviderSummaryOut(BaseModel):
     thumbs_up_count:     int
     thumbs_down_count:   int
     satisfaction_rate:   Optional[float]
+    # Nested objects for display
     category:            CategoryOut
     sub_category:        SubCategoryOut
     location_node:       LocationNodeOut
@@ -124,13 +135,13 @@ class ProviderSummaryOut(BaseModel):
 
 
 class ProviderOut(BaseModel):
-    """
-    Full provider profile — returned for GET /providers/{id}.
-    Includes everything ProviderSummaryOut has plus timestamps and user_id.
-    """
+    """Full provider profile."""
     id:                  uuid.UUID
     user_id:             uuid.UUID
     full_name:           str
+    category_id:         int
+    sub_category_id:     int
+    location_node_id:    int
     is_mobile_provider:  bool
     offers_delivery:     bool
     is_active:           bool
@@ -147,3 +158,11 @@ class ProviderOut(BaseModel):
     location_node:       LocationNodeOut
 
     model_config = {"from_attributes": True}
+
+
+class ProviderSearchOut(BaseModel):
+    """Paginated search response."""
+    total:     int
+    page:      int
+    page_size: int
+    results:   list[ProviderSummaryOut]

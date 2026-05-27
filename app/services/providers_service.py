@@ -1,12 +1,5 @@
 """
-Providers service — all provider business logic lives here.
-
-Functions:
-  - get_categories()       : return all active categories (for mobile dropdown)
-  - get_location_nodes()   : return all active location nodes (for mobile dropdown)
-  - register_provider()    : create provider profile, update user role
-  - search_providers()     : filter providers by location + category, ranked by reputation
-  - get_provider_by_id()   : fetch a single provider profile
+Providers service — all provider business logic.
 """
 
 import uuid
@@ -19,15 +12,14 @@ from app.models.category import Category, SubCategory
 from app.models.location_node import LocationNode
 from app.models.provider_profile import ProviderProfile
 from app.models.user import User, UserRole
-from app.schemas.providers import ProviderRegisterIn
+from app.schemas.providers import ProviderRegisterIn, ProviderUpdateIn
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Reference data — for mobile dropdown population
+# Reference data
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def get_categories(db: Session) -> list[Category]:
-    """Return all active categories ordered by sort_order."""
     return (
         db.query(Category)
         .filter(Category.is_active == True)        # noqa: E712
@@ -37,7 +29,6 @@ def get_categories(db: Session) -> list[Category]:
 
 
 def get_location_nodes(db: Session) -> list[LocationNode]:
-    """Return all active location nodes ordered by sort_order."""
     return (
         db.query(LocationNode)
         .filter(LocationNode.is_active == True)    # noqa: E712
@@ -55,30 +46,8 @@ def register_provider(
     current_user: User,
     db: Session,
 ) -> ProviderProfile:
-    """
-    Upgrade a customer account to a provider profile.
-
-    Flow:
-      1. Check user doesn't already have a provider profile
-      2. Validate category_id exists and is active
-      3. Validate sub_category_id exists, is active, and belongs to category_id
-      4. Validate location_node_id exists and is active
-      5. Create ProviderProfile record
-      6. Update user role to 'both' (they remain a customer + become a provider)
-      7. Return the new profile
-
-    Why 'both' and not 'provider'?
-    A registered provider can still hire other providers as a customer.
-    The 'both' role drives the UI toggle in the mobile app.
-    """
-
     # 1. No duplicate profiles
-    existing = (
-        db.query(ProviderProfile)
-        .filter(ProviderProfile.user_id == current_user.id)
-        .first()
-    )
-    if existing:
+    if db.query(ProviderProfile).filter(ProviderProfile.user_id == current_user.id).first():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Vous avez déjà un profil prestataire.",
@@ -121,7 +90,7 @@ def register_provider(
             detail=f"Zone géographique {data.location_node_id} introuvable ou inactive.",
         )
 
-    # 5. Create provider profile
+    # 5. Create profile
     profile = ProviderProfile(
         user_id=current_user.id,
         full_name=data.full_name,
@@ -133,72 +102,141 @@ def register_provider(
     )
     db.add(profile)
 
-    # 6. Update user role
-    current_user.role = UserRole.both
+    # 6. Upgrade user role to provider
+    current_user.role = UserRole.provider
     db.commit()
     db.refresh(profile)
-
     return profile
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Provider search
+# Provider profile update
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def update_provider(
+    data: ProviderUpdateIn,
+    current_user: User,
+    db: Session,
+) -> ProviderProfile:
+    profile = (
+        db.query(ProviderProfile)
+        .filter(ProviderProfile.user_id == current_user.id)
+        .first()
+    )
+    if not profile:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Vous n'avez pas encore de profil prestataire.",
+        )
+
+    # The effective category is the new one (if being changed) or the existing one
+    effective_category_id = data.category_id if data.category_id is not None else profile.category_id
+
+    # Validate new category if provided
+    if data.category_id is not None:
+        cat = db.query(Category).filter(
+            Category.id == data.category_id,
+            Category.is_active == True,     # noqa: E712
+        ).first()
+        if not cat:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Catégorie {data.category_id} introuvable.",
+            )
+
+    # Validate new sub-category if provided
+    if data.sub_category_id is not None:
+        sub = db.query(SubCategory).filter(
+            SubCategory.id == data.sub_category_id,
+            SubCategory.category_id == effective_category_id,
+            SubCategory.is_active == True,  # noqa: E712
+        ).first()
+        if not sub:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Sous-catégorie {data.sub_category_id} introuvable "
+                    f"ou n'appartient pas à la catégorie {effective_category_id}."
+                ),
+            )
+
+    # Validate new location if provided
+    if data.location_node_id is not None:
+        loc = db.query(LocationNode).filter(
+            LocationNode.id == data.location_node_id,
+            LocationNode.is_active == True,  # noqa: E712
+        ).first()
+        if not loc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Zone géographique {data.location_node_id} introuvable.",
+            )
+
+    # Apply updates
+    if data.full_name          is not None: profile.full_name          = data.full_name
+    if data.category_id        is not None: profile.category_id        = data.category_id
+    if data.sub_category_id    is not None: profile.sub_category_id    = data.sub_category_id
+    if data.location_node_id   is not None: profile.location_node_id   = data.location_node_id
+    if data.is_mobile_provider is not None: profile.is_mobile_provider = data.is_mobile_provider
+    if data.offers_delivery    is not None: profile.offers_delivery    = data.offers_delivery
+
+    db.commit()
+    db.refresh(profile)
+    return profile
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Provider search — paginated
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def search_providers(
     db: Session,
     location_node_id: Optional[int] = None,
-    category_id: Optional[int] = None,
-    limit: int = 20,
-    offset: int = 0,
-) -> list[ProviderProfile]:
+    category_id:      Optional[int] = None,
+    sub_category_id:  Optional[int] = None,
+    mobile_only:      bool = False,
+    delivery_only:    bool = False,
+    page:             int  = 1,
+    page_size:        int  = 20,
+) -> dict:
     """
-    Search active providers filtered by location and/or category.
-
-    Ranking: confirmed_tx_count DESC, thumbs_up_count DESC
-    — providers with more verified transactions rank higher.
-    This uses the idx_provider_ranking partial index defined in the migration.
-
-    Both filters are optional:
-    - No filters → returns top-ranked providers across all locations/categories
-    - location only → all providers in that neighbourhood
-    - category only → all providers in that trade
-    - both → most common mobile app query (e.g. "tailors near Mokolo")
-
-    Pagination via limit/offset for 2G-friendly page sizes.
+    Search active providers with optional filters.
+    Returns a paginated dict: {total, page, page_size, results}.
+    Ranked by confirmed_tx_count DESC, thumbs_up_count DESC.
     """
-    query = (
-        db.query(ProviderProfile)
-        .filter(ProviderProfile.is_active == True)  # noqa: E712
-    )
+    query = db.query(ProviderProfile).filter(ProviderProfile.is_active == True)  # noqa: E712
 
     if location_node_id is not None:
         query = query.filter(ProviderProfile.location_node_id == location_node_id)
-
     if category_id is not None:
         query = query.filter(ProviderProfile.category_id == category_id)
+    if sub_category_id is not None:
+        query = query.filter(ProviderProfile.sub_category_id == sub_category_id)
+    if mobile_only:
+        query = query.filter(ProviderProfile.is_mobile_provider == True)   # noqa: E712
+    if delivery_only:
+        query = query.filter(ProviderProfile.offers_delivery == True)      # noqa: E712
 
-    return (
+    total = query.count()
+    results = (
         query
         .order_by(
             ProviderProfile.confirmed_tx_count.desc(),
             ProviderProfile.thumbs_up_count.desc(),
         )
-        .limit(limit)
-        .offset(offset)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
         .all()
     )
 
+    return {"total": total, "page": page, "page_size": page_size, "results": results}
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Own profile lookup (authenticated)
+# Single profile lookups
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def get_my_provider_profile(current_user: User, db: Session) -> ProviderProfile:
-    """
-    Return the authenticated user's own provider profile.
-    Raises 404 if they haven't registered as a provider yet.
-    """
     profile = (
         db.query(ProviderProfile)
         .filter(ProviderProfile.user_id == current_user.id)
@@ -212,15 +250,7 @@ def get_my_provider_profile(current_user: User, db: Session) -> ProviderProfile:
     return profile
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Single provider lookup
-# ═══════════════════════════════════════════════════════════════════════════════
-
 def get_provider_by_id(provider_id: uuid.UUID, db: Session) -> ProviderProfile:
-    """
-    Fetch a single provider profile by its UUID.
-    Raises 404 if not found or inactive.
-    """
     profile = (
         db.query(ProviderProfile)
         .filter(
