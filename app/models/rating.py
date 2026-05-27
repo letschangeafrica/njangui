@@ -1,8 +1,10 @@
 import enum
 import uuid
 
-from sqlalchemy import Enum as SAEnum, ForeignKey, text
-from sqlalchemy.dialects.postgresql import TIMESTAMPTZ, UUID
+from datetime import datetime
+
+from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, text
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -61,13 +63,13 @@ class Rating(Base):
     )
 
     rating: Mapped[RatingValue] = mapped_column(
-        SAEnum(RatingValue, name="rating_value_enum", create_type=True),
+        SAEnum(RatingValue, name="rating_value_enum", create_type=False),
         nullable=False,
         comment="Binary: thumbs_up increments thumbs_up_count, thumbs_down the opposite.",
     )
 
-    created_at: Mapped[TIMESTAMPTZ] = mapped_column(
-        TIMESTAMPTZ,
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
         nullable=False,
         server_default=text("NOW()"),
         comment="Submission timestamp.",

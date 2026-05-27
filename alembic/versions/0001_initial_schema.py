@@ -28,7 +28,6 @@ depends_on: Union[str, Sequence[str], None] = None
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def upgrade() -> None:
-    _create_enum_types()
     _create_tables()
     _create_indexes()
     _create_triggers()
@@ -46,17 +45,17 @@ def _create_enum_types() -> None:
     them explicitly here so the migration is fully self-contained.
     """
     op.execute("""
-        CREATE TYPE user_role_enum AS ENUM ('customer', 'provider', 'both')
+        CREATE TYPE IF NOT EXISTS user_role_enum AS ENUM ('customer', 'provider', 'both')
     """)
     op.execute("""
-        CREATE TYPE transaction_status_enum AS ENUM
+        CREATE TYPE IF NOT EXISTS transaction_status_enum AS ENUM
             ('pending', 'confirmed', 'expired', 'disputed')
     """)
     op.execute("""
-        CREATE TYPE rating_value_enum AS ENUM ('thumbs_up', 'thumbs_down')
+        CREATE TYPE IF NOT EXISTS rating_value_enum AS ENUM ('thumbs_up', 'thumbs_down')
     """)
     op.execute("""
-        CREATE TYPE fraud_flag_status_enum AS ENUM
+        CREATE TYPE IF NOT EXISTS fraud_flag_status_enum AS ENUM
             ('pending', 'reviewed_valid', 'reviewed_invalid')
     """)
 
@@ -110,16 +109,16 @@ def _create_tables() -> None:
         sa.Column("phone_number",     sa.String(15),     nullable=False, unique=True),
         sa.Column("pin_hash",         sa.String(60),     nullable=False),
         sa.Column("role",             sa.Enum("customer", "provider", "both",
-                                              name="user_role_enum", create_type=False),
+                                              name="user_role_enum", create_type=True),
                   nullable=False, server_default="customer"),
         sa.Column("is_verified",      sa.Boolean(),      nullable=False, server_default="FALSE"),
         sa.Column("is_active",        sa.Boolean(),      nullable=False, server_default="TRUE"),
         sa.Column("otp_attempts",     sa.SmallInteger(), nullable=False, server_default="0"),
-        sa.Column("otp_locked_until", postgresql.TIMESTAMPTZ(), nullable=True),
+        sa.Column("otp_locked_until", sa.DateTime(timezone=True), nullable=True),
         sa.Column("language",         sa.String(2),      nullable=False, server_default="'fr'"),
-        sa.Column("created_at",       postgresql.TIMESTAMPTZ(), nullable=False,
+        sa.Column("created_at",       sa.DateTime(timezone=True), nullable=False,
                   server_default=sa.text("NOW()")),
-        sa.Column("last_login_at",    postgresql.TIMESTAMPTZ(), nullable=True),
+        sa.Column("last_login_at",    sa.DateTime(timezone=True), nullable=True),
     )
 
     # ── 5. provider_profiles (FK → users, categories, sub_categories, location_nodes) ──
@@ -142,9 +141,9 @@ def _create_tables() -> None:
         sa.Column("confirmed_tx_count",sa.Integer(),      nullable=False, server_default="0"),
         sa.Column("thumbs_up_count",   sa.Integer(),      nullable=False, server_default="0"),
         sa.Column("thumbs_down_count", sa.Integer(),      nullable=False, server_default="0"),
-        sa.Column("created_at",        postgresql.TIMESTAMPTZ(), nullable=False,
+        sa.Column("created_at",        sa.DateTime(timezone=True), nullable=False,
                   server_default=sa.text("NOW()")),
-        sa.Column("updated_at",        postgresql.TIMESTAMPTZ(), nullable=False,
+        sa.Column("updated_at",        sa.DateTime(timezone=True), nullable=False,
                   server_default=sa.text("NOW()")),
         sa.ForeignKeyConstraint(["user_id"],          ["users.id"]),
         sa.ForeignKeyConstraint(["category_id"],      ["categories.id"]),
@@ -162,14 +161,14 @@ def _create_tables() -> None:
         sa.Column("sub_category_id",         sa.Integer(),      nullable=False),
         sa.Column("amount_xaf",              sa.Integer(),      nullable=False),
         sa.Column("initiated_by",            postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("initiated_at",            postgresql.TIMESTAMPTZ(), nullable=False,
+        sa.Column("initiated_at",            sa.DateTime(timezone=True), nullable=False,
                   server_default=sa.text("NOW()")),
-        sa.Column("provider_confirmed_at",   postgresql.TIMESTAMPTZ(), nullable=True),
-        sa.Column("customer_confirmed_at",   postgresql.TIMESTAMPTZ(), nullable=True),
-        sa.Column("expires_at",              postgresql.TIMESTAMPTZ(), nullable=False),
+        sa.Column("provider_confirmed_at",   sa.DateTime(timezone=True), nullable=True),
+        sa.Column("customer_confirmed_at",   sa.DateTime(timezone=True), nullable=True),
+        sa.Column("expires_at",              sa.DateTime(timezone=True), nullable=False),
         sa.Column("status",
                   sa.Enum("pending", "confirmed", "expired", "disputed",
-                           name="transaction_status_enum", create_type=False),
+                           name="transaction_status_enum", create_type=True),
                   nullable=False, server_default="pending"),
         sa.Column("is_mobile_money_verified",sa.Boolean(),      nullable=False, server_default="FALSE"),
         sa.Column("location_node_id",        sa.Integer(),      nullable=True),
@@ -193,9 +192,9 @@ def _create_tables() -> None:
         sa.Column("rated_by",       postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("rating",
                   sa.Enum("thumbs_up", "thumbs_down",
-                           name="rating_value_enum", create_type=False),
+                           name="rating_value_enum", create_type=True),
                   nullable=False),
-        sa.Column("created_at",     postgresql.TIMESTAMPTZ(), nullable=False,
+        sa.Column("created_at",     sa.DateTime(timezone=True), nullable=False,
                   server_default=sa.text("NOW()")),
         sa.ForeignKeyConstraint(["transaction_id"], ["transactions.id"]),
         sa.ForeignKeyConstraint(["rated_by"],       ["users.id"]),
@@ -211,10 +210,10 @@ def _create_tables() -> None:
         sa.Column("reason",              sa.Text(),  nullable=True),
         sa.Column("status",
                   sa.Enum("pending", "reviewed_valid", "reviewed_invalid",
-                           name="fraud_flag_status_enum", create_type=False),
+                           name="fraud_flag_status_enum", create_type=True),
                   nullable=False, server_default="pending"),
         sa.Column("admin_note",          sa.Text(),  nullable=True),
-        sa.Column("created_at",          postgresql.TIMESTAMPTZ(), nullable=False,
+        sa.Column("created_at",          sa.DateTime(timezone=True), nullable=False,
                   server_default=sa.text("NOW()")),
         sa.ForeignKeyConstraint(["flagged_provider_id"], ["users.id"]),
         sa.ForeignKeyConstraint(["flagged_by"],          ["users.id"]),
@@ -229,10 +228,10 @@ def _create_tables() -> None:
         sa.Column("id",            sa.Integer(),      primary_key=True, autoincrement=True),
         sa.Column("phone_number",  sa.String(15),     nullable=False),
         sa.Column("code_hash",     sa.String(60),     nullable=False),
-        sa.Column("expires_at",    postgresql.TIMESTAMPTZ(), nullable=False),
+        sa.Column("expires_at",    sa.DateTime(timezone=True), nullable=False),
         sa.Column("is_used",       sa.Boolean(),      nullable=False, server_default="FALSE"),
         sa.Column("attempt_count", sa.SmallInteger(), nullable=False, server_default="0"),
-        sa.Column("created_at",    postgresql.TIMESTAMPTZ(), nullable=False,
+        sa.Column("created_at",    sa.DateTime(timezone=True), nullable=False,
                   server_default=sa.text("NOW()")),
     )
 

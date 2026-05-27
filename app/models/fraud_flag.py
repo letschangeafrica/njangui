@@ -1,8 +1,10 @@
 import enum
 import uuid
 
-from sqlalchemy import Enum as SAEnum, ForeignKey, Text, UniqueConstraint, text
-from sqlalchemy.dialects.postgresql import TIMESTAMPTZ, UUID
+from datetime import datetime
+
+from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, Text, UniqueConstraint, text
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -73,7 +75,7 @@ class FraudFlag(Base):
     )
 
     status: Mapped[FraudFlagStatus] = mapped_column(
-        SAEnum(FraudFlagStatus, name="fraud_flag_status_enum", create_type=True),
+        SAEnum(FraudFlagStatus, name="fraud_flag_status_enum", create_type=False),
         nullable=False,
         default=FraudFlagStatus.pending,
         server_default=FraudFlagStatus.pending.value,
@@ -86,8 +88,8 @@ class FraudFlag(Base):
         comment="Internal admin note after review. NEVER shown to either party.",
     )
 
-    created_at: Mapped[TIMESTAMPTZ] = mapped_column(
-        TIMESTAMPTZ,
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
         nullable=False,
         server_default=text("NOW()"),
     )

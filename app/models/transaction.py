@@ -1,15 +1,18 @@
 import enum
 import uuid
 
+from datetime import datetime
+
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    DateTime,
     Enum as SAEnum,
     ForeignKey,
     Integer,
     text,
 )
-from sqlalchemy.dialects.postgresql import TIMESTAMPTZ, UUID
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -94,33 +97,33 @@ class Transaction(Base):
         comment="Which party (provider or customer) created this transaction record.",
     )
 
-    initiated_at: Mapped[TIMESTAMPTZ] = mapped_column(
-        TIMESTAMPTZ,
+    initiated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
         nullable=False,
         server_default=text("NOW()"),
         comment="When the transaction was initiated. Confirmation window calculated from this.",
     )
 
-    provider_confirmed_at: Mapped[TIMESTAMPTZ | None] = mapped_column(
-        TIMESTAMPTZ,
+    provider_confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
         nullable=True,
         comment="Timestamp of provider confirmation tap. NULL = not yet confirmed by provider.",
     )
 
-    customer_confirmed_at: Mapped[TIMESTAMPTZ | None] = mapped_column(
-        TIMESTAMPTZ,
+    customer_confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
         nullable=True,
         comment="Timestamp of customer confirmation tap. NULL = not yet confirmed by customer.",
     )
 
-    expires_at: Mapped[TIMESTAMPTZ] = mapped_column(
-        TIMESTAMPTZ,
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
         nullable=False,
         comment="Set to initiated_at + 24 hours. Celery task checks this to expire transactions.",
     )
 
     status: Mapped[TransactionStatus] = mapped_column(
-        SAEnum(TransactionStatus, name="transaction_status_enum", create_type=True),
+        SAEnum(TransactionStatus, name="transaction_status_enum", create_type=False),
         nullable=False,
         default=TransactionStatus.pending,
         server_default=TransactionStatus.pending.value,

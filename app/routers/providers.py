@@ -1,177 +1,163 @@
 """
-Providers router — HTTP layer for provider registration, profiles, and search.
+Providers router — HTTP layer for provider endpoints.
 
 Endpoints:
-  POST   /providers/register          → create a provider profile
-  GET    /providers/me                → own profile (authenticated)
-  PUT    /providers/me                → update own profile (authenticated)
-  GET    /providers/{provider_id}     → public profile by UUID
-  GET    /providers                   → paginated provider search
-  GET    /providers/categories        → reference data: all categories + sub-categories
-  GET    /providers/locations         → reference data: all location nodes
+  GET  /providers/categories     → list all categories (mobile dropdown)
+  GET  /providers/locations      → list all location nodes (mobile dropdown)
+  POST /providers/register       → register current user as a provider
+  GET  /providers/me             → get own provider profile (authenticated)
+  GET  /providers                → search providers (filter by location + category)
+  GET  /providers/{provider_id}  → get one provider's full profile
+
+Route ordering matters in FastAPI:
+  /providers/categories, /providers/locations, and /providers/me MUST be
+  defined BEFORE /providers/{provider_id} — otherwise FastAPI would try to
+  match those literal strings as a UUID and return a 422 validation error.
 """
 
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user
 from app.database import get_db
-from app.models.user import User
-from app.schemas.provider import (
-    CategoryWithSubsOut,
+from app.schemas.providers import (
+    CategoryOut,
     LocationNodeOut,
-    ProviderProfileOut,
+    ProviderOut,
     ProviderRegisterIn,
-    ProviderSearchOut,
-    ProviderUpdateIn,
+    ProviderSummaryOut,
 )
-from app.services import provider_service
+from app.services import providers_service
 
 router = APIRouter()
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Reference data (no auth — mobile client calls these at startup to build dropdowns)
-# ═══════════════════════════════════════════════════════════════════════════════
-
+# ── GET /providers/categories ─────────────────────────────────────────────────
 @router.get(
     "/categories",
-    response_model=list[CategoryWithSubsOut],
-    summary="List all service categories with sub-categories",
+    response_model=list[CategoryOut],
+    status_code=status.HTTP_200_OK,
+    summary="List all categories",
     description=(
-        "Returns all active top-level categories and their sub-categories. "
-        "The mobile client downloads this once and caches it locally — no repeated calls."
+        "Returns the 8 active service categories in sort order. "
+        "Used by the mobile app to populate the category picker. "
+        "No authentication required."
     ),
 )
 def list_categories(db: Session = Depends(get_db)):
-    return provider_service.get_categories(db)
+    return providers_service.get_categories(db)
 
 
+# ── GET /providers/locations ──────────────────────────────────────────────────
 @router.get(
     "/locations",
     response_model=list[LocationNodeOut],
-    summary="List all Yaoundé location nodes",
+    status_code=status.HTTP_200_OK,
+    summary="List all location nodes",
     description=(
-        "Returns the 16 predefined Yaoundé economic nodes. "
-        "Providers pick their zone from this list — no free-text location entry."
+        "Returns the 16 predefined Yaoundé economic nodes in sort order. "
+        "Used by the mobile app to populate the neighbourhood picker. "
+        "No authentication required."
     ),
 )
 def list_locations(db: Session = Depends(get_db)):
-    return provider_service.get_location_nodes(db)
+    return providers_service.get_location_nodes(db)
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Provider search (no auth — discovery is public)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@router.get(
-    "",
-    response_model=ProviderSearchOut,
-    summary="Search and discover providers",
+# ── POST /providers/register ──────────────────────────────────────────────────
+@router.post(
+    "/register",
+    response_model=ProviderOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Register as a provider",
     description=(
-        "Paginated provider discovery. "
-        "Results ranked by confirmed_tx_count DESC, thumbs_up_count DESC. "
-        "All filters are optional — no filter = all active providers. "
-        "Page size is capped at 50."
+        "Upgrades the authenticated user's account to include a provider profile. "
+        "The user's role changes from 'customer' to 'both'. "
+        "A user can only have one provider profile. "
+        "Requires a valid Bearer token."
     ),
 )
-def search_providers(
-    location_node_id: Optional[int] = Query(None, gt=0, description="Filter by Yaoundé zone ID"),
-    category_id:      Optional[int] = Query(None, gt=0, description="Filter by top-level category ID"),
-    sub_category_id:  Optional[int] = Query(None, gt=0, description="Filter by sub-category ID (pair with category_id)"),
-    mobile_only:      bool          = Query(False,       description="Only show providers who travel to the customer"),
-    delivery_only:    bool          = Query(False,       description="Only show providers who offer delivery"),
-    page:             int           = Query(1,     ge=1, description="Page number (1-indexed)"),
-    page_size:        int           = Query(20,    ge=1, description="Results per page (max 50)"),
+def register_provider(
+    body: ProviderRegisterIn,
+    current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return provider_service.search_providers(
+    return providers_service.register_provider(
+        data=body,
+        current_user=current_user,
         db=db,
-        location_node_id=location_node_id,
-        category_id=category_id,
-        sub_category_id=sub_category_id,
-        mobile_only=mobile_only,
-        delivery_only=delivery_only,
-        page=page,
-        page_size=page_size,
     )
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Authenticated: own profile
-# These two routes MUST come before /{provider_id} to avoid route shadowing
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@router.post(
-    "/register",
-    response_model=ProviderProfileOut,
-    status_code=201,
-    summary="Register as a provider",
-    description=(
-        "Create a provider profile for the authenticated user. "
-        "Each user can only have one profile. "
-        "On success, the user's role is updated from 'customer' to 'provider'."
-    ),
-)
-def register_as_provider(
-    data: ProviderRegisterIn,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    return provider_service.register_provider(data, current_user, db)
-
-
+# ── GET /providers/me ─────────────────────────────────────────────────────────
 @router.get(
     "/me",
-    response_model=ProviderProfileOut,
+    response_model=ProviderOut,
+    status_code=status.HTTP_200_OK,
     summary="Get own provider profile",
     description=(
-        "Returns the authenticated user's provider profile. "
-        "Returns 404 if the user hasn't registered as a provider yet."
+        "Returns the authenticated user's own provider profile. "
+        "Returns 404 if the user hasn't registered as a provider yet. "
+        "Requires a valid Bearer token."
     ),
 )
 def get_my_profile(
-    current_user: User = Depends(get_current_user),
+    current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return provider_service.get_my_provider_profile(current_user, db)
+    return providers_service.get_my_provider_profile(
+        current_user=current_user,
+        db=db,
+    )
 
 
-@router.put(
-    "/me",
-    response_model=ProviderProfileOut,
-    summary="Update own provider profile",
+# ── GET /providers ────────────────────────────────────────────────────────────
+@router.get(
+    "",
+    response_model=list[ProviderSummaryOut],
+    status_code=status.HTTP_200_OK,
+    summary="Search providers",
     description=(
-        "Partial update — only fields included in the request body are changed. "
-        "If changing category_id, also provide sub_category_id to ensure consistency."
+        "Returns active providers filtered by location and/or category. "
+        "Results are ranked by reputation: confirmed_tx_count DESC, thumbs_up_count DESC. "
+        "Both filters are optional. Supports pagination."
     ),
 )
-def update_my_profile(
-    data: ProviderUpdateIn,
-    current_user: User = Depends(get_current_user),
+def search_providers(
+    location_node_id: Optional[int] = Query(None, description="Filter by neighbourhood ID"),
+    category_id:      Optional[int] = Query(None, description="Filter by category ID"),
+    limit:            int           = Query(20,   ge=1, le=50),
+    offset:           int           = Query(0,    ge=0),
     db: Session = Depends(get_db),
 ):
-    return provider_service.update_my_provider_profile(data, current_user, db)
+    return providers_service.search_providers(
+        db=db,
+        location_node_id=location_node_id,
+        category_id=category_id,
+        limit=limit,
+        offset=offset,
+    )
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Public: provider profile by ID (must be last — parameterized route)
-# ═══════════════════════════════════════════════════════════════════════════════
-
+# ── GET /providers/{provider_id} ──────────────────────────────────────────────
 @router.get(
     "/{provider_id}",
-    response_model=ProviderProfileOut,
-    summary="Get a provider's public profile",
+    response_model=ProviderOut,
+    status_code=status.HTTP_200_OK,
+    summary="Get a provider profile",
     description=(
-        "Returns a public provider profile. "
-        "Suspended (is_active=FALSE) profiles return 404."
+        "Returns the full profile for a single provider by their profile UUID. "
+        "Returns 404 if the provider does not exist or is suspended."
     ),
 )
-def get_provider_profile(
+def get_provider(
     provider_id: uuid.UUID,
     db: Session = Depends(get_db),
 ):
-    return provider_service.get_provider_by_id(provider_id, db)
+    return providers_service.get_provider_by_id(
+        provider_id=provider_id,
+        db=db,
+    )

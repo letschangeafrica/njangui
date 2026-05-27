@@ -1,5 +1,6 @@
-from sqlalchemy import Boolean, Index, Integer, SmallInteger, String, text
-from sqlalchemy.dialects.postgresql import TIMESTAMPTZ
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, Index, Integer, SmallInteger, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -52,8 +53,8 @@ class OtpCode(Base):
         comment="bcrypt hash of the 6-digit OTP. NEVER stored plain. Compared at verification.",
     )
 
-    expires_at: Mapped[TIMESTAMPTZ] = mapped_column(
-        TIMESTAMPTZ,
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
         nullable=False,
         comment="Set to NOW() + 10 minutes. Expired codes are rejected and cleaned up.",
     )
@@ -74,8 +75,8 @@ class OtpCode(Base):
         comment="Incremented on each failed attempt. At 5: lock the parent user account.",
     )
 
-    created_at: Mapped[TIMESTAMPTZ] = mapped_column(
-        TIMESTAMPTZ,
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
         nullable=False,
         server_default=text("NOW()"),
         comment="Creation timestamp. Used for rate limiting: max 3 OTP requests per phone per hour.",

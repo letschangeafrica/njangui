@@ -1,8 +1,9 @@
 import enum
 import uuid
+from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, Enum as SAEnum, SmallInteger, String, text
-from sqlalchemy.dialects.postgresql import TIMESTAMPTZ, UUID
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Enum as SAEnum, SmallInteger, String, text
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -52,7 +53,7 @@ class User(Base):
     )
 
     role: Mapped[UserRole] = mapped_column(
-        SAEnum(UserRole, name="user_role_enum", create_type=True),
+        SAEnum(UserRole, name="user_role_enum", create_type=False),
         nullable=False,
         default=UserRole.customer,
         server_default=UserRole.customer.value,
@@ -83,8 +84,8 @@ class User(Base):
         comment="Tracks failed OTP attempts. Resets after successful auth or lockout expiry.",
     )
 
-    otp_locked_until: Mapped[TIMESTAMPTZ | None] = mapped_column(
-        TIMESTAMPTZ,
+    otp_locked_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
         nullable=True,
         comment="If not NULL and in future: account is locked. Set to NOW() + 30min after 5 failures.",
     )
@@ -97,15 +98,15 @@ class User(Base):
         comment="UI language. Values: 'fr' (French), 'en' (English). Set once at onboarding.",
     )
 
-    created_at: Mapped[TIMESTAMPTZ] = mapped_column(
-        TIMESTAMPTZ,
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
         nullable=False,
         server_default=text("NOW()"),
         comment="Account creation timestamp. UTC always. Used for cohort analysis.",
     )
 
-    last_login_at: Mapped[TIMESTAMPTZ | None] = mapped_column(
-        TIMESTAMPTZ,
+    last_login_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
         nullable=True,
         comment="Updated on every successful authentication. Used to identify inactive accounts.",
     )

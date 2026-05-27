@@ -1,7 +1,9 @@
 import uuid
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, text
-from sqlalchemy.dialects.postgresql import TIMESTAMPTZ, UUID
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, text
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -130,14 +132,14 @@ class ProviderProfile(Base):
         comment="DENORMALISED. Paired with thumbs_up_count for satisfaction rate calculation.",
     )
 
-    created_at: Mapped[TIMESTAMPTZ] = mapped_column(
-        TIMESTAMPTZ,
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
         nullable=False,
         server_default=text("NOW()"),
     )
 
-    updated_at: Mapped[TIMESTAMPTZ] = mapped_column(
-        TIMESTAMPTZ,
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
         nullable=False,
         server_default=text("NOW()"),
         comment="Updated on every profile change. Useful for cache invalidation.",
